@@ -5,17 +5,16 @@ authors = ["Alex Maiorella <alex@maiorella.org>"]
 edition = "2018"
 
 [features]
-default = []
+default = ["useopencv"]
 useopencv = ["opencv"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
+opencv = { version = "0.46", optional = true }
 bitvec = "0.20"
 rand = "*"
-itertools = "*"
 bincode = "*"
 thiserror = "*"
-opencv = { version = "0.46", optional = true }
 
 [[example]]
 name = "match"

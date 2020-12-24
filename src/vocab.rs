@@ -1,49 +1,43 @@
 use bincode;
-use bitvec::prelude::*;
-use rand::prelude::*;
+use bitvec::{order::Msb0, view::BitView};
+use rand::{seq::SliceRandom, thread_rng};
 use serde::{Deserialize, Serialize};
-use std::{fmt, io, path::Path};
-use thiserror::Error;
+use std::{fmt, path::Path};
 
-use crate::{hamming, BoW, Desc};
+use crate::*;
 
 #[derive(Serialize, Deserialize, PartialEq)]
+/// Feature vocabulary built from a collection of image keypoint descriptors. Can be:
+/// 1. Created.
+/// 2. Saved to a file.
+/// 3. Loaded from a file.
+/// 4. Used to transform a new set of descriptors into a BoW.
 pub struct Vocabulary {
-    pub(crate) blocks: Vec<Block>,
-    pub(crate) k: usize,
-    pub(crate) l: usize,
-    pub(crate) next_block_id: usize,
-    pub(crate) next_leaf_id: usize,
+    blocks: Vec<Block>,
+    k: usize,
+    l: usize,
+    num_blocks: usize,
+    num_leaves: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-pub(crate) struct Block {
-    pub(crate) id: NodeId,
-    pub(crate) children: Children,
+struct Block {
+    id: NodeId,
+    children: Children,
 }
 
 #[derive(Serialize, Deserialize, PartialEq)]
-pub(crate) struct Children {
-    pub(crate) features: Vec<Desc>,
-    pub(crate) weights: Vec<f32>,
-    pub(crate) cluster_size: Vec<usize>,
-    pub(crate) ids: Vec<NodeId>,
+struct Children {
+    features: Vec<Desc>,
+    weights: Vec<f32>,
+    cluster_size: Vec<usize>,
+    ids: Vec<NodeId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq)]
-pub(crate) enum NodeId {
+enum NodeId {
     Block(usize),
     Leaf(usize),
-}
-type Result<T> = std::result::Result<T, BowErr>;
-#[derive(Error, Debug)]
-pub enum BowErr {
-    #[error("Io Error")]
-    Io(#[from] io::Error),
-    #[error("Vocabulary Serialization Error")]
-    Bincode(#[from] bincode::Error),
-    #[error("BoW error")]
-    Unknown,
 }
 
 impl NodeId {
@@ -77,8 +71,8 @@ impl fmt::Debug for Vocabulary {
         }
         let sum = clust_sizes.iter().sum::<usize>();
         f.debug_struct("Vocabulary")
-            .field("Word/Leaf Nodes", &self.next_leaf_id)
-            .field("Other Nodes", &self.next_block_id)
+            .field("Word/Leaf Nodes", &self.num_leaves)
+            .field("Other Nodes", &self.num_blocks)
             .field("Levels", &self.l)
             .field("Branching Factor", &self.k)
             .field("Total Training Features", &sum)
@@ -96,7 +90,7 @@ impl fmt::Debug for Vocabulary {
 }
 
 impl Vocabulary {
-    /// Load an ABoW vocabulary from file
+    /// Load an ABoW vocabulary from a file
     pub fn load<P: AsRef<Path>>(file: P) -> Result<Self> {
         let mut file = std::fs::File::open(file)?;
         let mut buffer: Vec<u8> = Vec::new();
@@ -104,10 +98,18 @@ impl Vocabulary {
         Ok(bincode::deserialize(&buffer)?)
     }
 
-    /// Transform a vector of 32 bit binary descriptors into its bag of words
+    /// Save vocabulary to a file
+    pub fn save<P: AsRef<Path>>(&self, file: P) -> Result<()> {
+        let serialized = bincode::serialize(&self)?;
+        let mut file = std::fs::File::create(file)?;
+        std::io::Write::write_all(&mut file, &serialized)?;
+        Ok(())
+    }
+
+    /// Transform a vector of binary descriptors into its bag of words
     /// representation with respect to the Vocabulary. Descriptor is l1 normalized.
     pub fn transform(&self, features: &Vec<Desc>) -> Result<BoW> {
-        let mut bow: BoW = vec![0.; self.next_leaf_id];
+        let mut bow: BoW = vec![0.; self.num_leaves];
         for feature in features {
             let mut block = &self.blocks[0];
             let mut best: (u8, usize) = (u8::MAX, 0);
@@ -115,7 +117,7 @@ impl Vocabulary {
             loop {
                 for child in 0..block.children.ids.len() {
                     let child_feat = &block.children.features[child];
-                    let d = hamming(feature, child_feat);
+                    let d = Self::hamming(feature, child_feat);
                     if d < best.0 {
                         best = (d, child)
                     }
@@ -139,17 +141,18 @@ impl Vocabulary {
                 best = (u8::MAX, 0);
             }
         }
-        // Normalize BoW
-        let sum: f32 = bow.iter().sum();
-        if sum > 0. {
-            let inv_sum = 1. / sum;
-            for w in bow.iter_mut() {
-                *w *= inv_sum;
-            }
-        }
+        // Normalize BoW vector
+        bow.l1_normalize();
+
         Ok(bow)
     }
 
+    /// Build a vocabulary from a collection of descriptors.
+    ///
+    /// # Arguments
+    /// k: Branching factor
+    ///
+    /// l: Max number of levels
     pub fn create(features: &Vec<Desc>, k: usize, l: usize) -> Result<Self> {
         // Start with root of tree
         let mut v = Self::empty(k, l);
@@ -192,7 +195,7 @@ impl Vocabulary {
                 for (i, f) in features.iter().enumerate() {
                     let mut best: (usize, u8) = (0, u8::MAX);
                     for (j, c) in clusters.iter().enumerate() {
-                        let d = hamming(c, f);
+                        let d = Self::hamming(c, f);
                         if d < best.1 {
                             best = (j, d);
                         }
@@ -261,6 +264,7 @@ impl Vocabulary {
     }
 
     #[inline]
+    /// Compute the mean of a collection of binary arrays (descriptors).
     fn desc_mean(descriptors: Vec<&Desc>) -> Desc {
         let n2 = descriptors.len() / 2;
         let mut counts = vec![0; std::mem::size_of::<Desc>() * 8];
@@ -281,15 +285,24 @@ impl Vocabulary {
         result
     }
 
+    #[inline]
+    /// Hamming distance between two binary arrays (descriptors).
+    fn hamming(x: &[u8], y: &[u8]) -> u8 {
+        x.iter()
+            .zip(y)
+            .fold(0, |a, (b, c)| a + (*b ^ *c).count_ones() as u8)
+    }
+
+    /// Provide the next NodeId, either leaf/word or block.
     fn next_node_id(&mut self, leaf: bool) -> NodeId {
         match leaf {
             true => {
-                self.next_leaf_id += 1;
-                NodeId::Leaf(self.next_leaf_id)
+                self.num_leaves += 1;
+                NodeId::Leaf(self.num_leaves)
             }
             false => {
-                self.next_block_id += 1;
-                NodeId::Block(self.next_block_id)
+                self.num_blocks += 1;
+                NodeId::Block(self.num_blocks)
             }
         }
     }
@@ -298,8 +311,8 @@ impl Vocabulary {
             blocks: Vec::new(),
             k,
             l,
-            next_block_id: 0,
-            next_leaf_id: 0,
+            num_blocks: 0,
+            num_leaves: 0,
         }
     }
 }
@@ -317,7 +330,7 @@ mod tests {
         for entry in path.read_dir().expect("read_dir call failed") {
             if let Ok(entry) = entry {
                 println!("{:?}", entry.path());
-                features.extend(crate::opencv_utils::load_img_get_kps(&entry.path()));
+                features.extend(crate::opencv_utils::load_img_get_kps(&entry.path()).unwrap());
             }
         }
         println!("Detected {} ORB keypoints.", features.len());
@@ -331,7 +344,7 @@ mod tests {
         for entry in path.read_dir().expect("read_dir call failed") {
             if let Ok(entry) = entry {
                 println!("{:?}", entry.path());
-                features.extend(crate::opencv_utils::load_img_get_kps(&entry.path()));
+                features.extend(crate::opencv_utils::load_img_get_kps(&entry.path()).unwrap());
             }
         }
         println!("Detected {} ORB keypoints.", features.len());
@@ -339,7 +352,8 @@ mod tests {
         println!("Vocabulary: {:#?}", voc);
         let new_feat = crate::opencv_utils::load_img_get_kps(&std::path::PathBuf::from(
             "../fbow/data/test/image_00508.jpg",
-        ));
+        ))
+        .unwrap();
 
         let t = voc.transform(&new_feat).unwrap();
         println!("Resulting bag-of-words representation:\n {:#?}", t);
@@ -352,11 +366,11 @@ mod tests {
         for entry in path.read_dir().expect("read_dir call failed") {
             if let Ok(entry) = entry {
                 println!("{:?}", entry.path());
-                features.extend(crate::opencv_utils::load_img_get_kps(&entry.path()));
+                features.extend(crate::opencv_utils::load_img_get_kps(&entry.path()).unwrap());
             }
         }
         println!("Detected {} ORB keypoints.", features.len());
-        let voc = Vocabulary::create(&features, 5, 5).unwrap();
+        let voc = Vocabulary::create(&features, 3, 3).unwrap();
 
         {
             let serialized = bincode::serialize(&voc).unwrap();
@@ -384,7 +398,8 @@ mod tests {
         println!("Vocabulary: {:#?}", voc);
         let new_feat = crate::opencv_utils::load_img_get_kps(&std::path::PathBuf::from(
             "../fbow/data/test/image_00508.jpg",
-        ));
+        ))
+        .unwrap();
 
         let t = voc.transform(&new_feat);
         println!("Resulting bag-of-words representation:\n {:#?}", t);

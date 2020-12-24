@@ -1,50 +1,38 @@
-use abow::opencv_utils;
-use abow::vocab::Vocabulary;
-use abow::BoW;
-use abow::Similarity;
 use std::{
-    collections::HashMap,
+    ffi::OsStr,
     path::{Path, PathBuf},
 };
 
+use abow::*;
+
 fn main() {
-    let mut file = std::fs::File::open("vocabs/test.voc").unwrap();
-    let mut buffer = Vec::<u8>::new();
-    std::io::Read::read_to_end(&mut file, &mut buffer).unwrap();
-    let voc: Vocabulary = bincode::deserialize(&buffer).unwrap();
+    // Load existing vocabulary
+    let voc = Vocabulary::load("vocabs/test.voc").unwrap();
     println!("Vocabulary: {:#?}", voc);
 
-    let path = std::path::Path::new("data/test");
-    let mut bows: Vec<(String, BoW)> = Vec::new();
-    for entry in path.read_dir().expect("read_dir call failed") {
+    // Create BoW vectors from the test data. Save file name for demonstration.
+    let mut bows: Vec<(PathBuf, BoW)> = Vec::new();
+    for entry in Path::new("data/test").read_dir().expect("Error") {
         if let Ok(entry) = entry {
-            println!("{:?}", entry.path());
-            let new_feat = crate::opencv_utils::load_img_get_kps(&entry.path());
-            bows.push((
-                entry
-                    .path()
-                    .file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .to_string(),
-                voc.transform(&new_feat).unwrap(),
-            ));
+            let new_feat = load_img_get_kps(&entry.path()).unwrap();
+            bows.push((entry.path(), voc.transform(&new_feat).unwrap()));
         }
     }
-    for (f1, bow1) in bows.iter().take(100) {
-        let mut sims: Vec<(f32, String)> = Vec::new();
+
+    // Match every image to every other image
+    for (f1, bow1) in bows.iter() {
+        let mut scores: Vec<(f32, &OsStr)> = Vec::new();
         for (f2, bow2) in bows.iter() {
             let d = bow1.l1(bow2);
-            sims.push((d, f2.clone()));
+            scores.push((d, f2.file_name().unwrap()));
         }
-        sims.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-        sims = sims[..10].to_owned();
 
-        println!("\nTop 10 Matches for {}:", f1);
+        // Print out the top 5 matches for each image
+        println!("\nTop 5 Matches for {:#?}:", f1.file_name().unwrap());
         println!("Match      |      Score");
-        for m in sims {
-            println!("{} | {}", m.1, m.0);
+        scores.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        for m in scores[..5].iter() {
+            println!("{:#?} | {:#?}", m.1, m.0);
         }
     }
 }
