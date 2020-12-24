@@ -1,0 +1,29 @@
+[package]
+name = "abow"
+version = "0.1.0"
+authors = ["Alex Maiorella <alex@maiorella.org>"]
+edition = "2018"
+
+[features]
+default = []
+useopencv = ["opencv"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+bitvec = "0.20"
+rand = "*"
+itertools = "*"
+bincode = "*"
+thiserror = "*"
+opencv = { version = "0.46", optional = true }
+
+[[example]]
+name = "match"
+required-features = ["useopencv"]
+
+[[example]]
+name = "create-voc"
+required-features = ["useopencv"]
+
+[profile.release]
+debug = true
