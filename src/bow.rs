@@ -1,10 +1,14 @@
-/// Index is word/leaf id. Value is total weight of that word in provided features.
+/// Bag-of-Words representation of an image or descriptor set.
+///
+/// Index: word/leaf id in the vocabulary.
+///
+/// Value: total weight of that word in provided features.
 pub type BoW = Vec<f32>;
 
+/// Provides method(s) for computing the similarity score between bow vectors.
 pub trait BoWTrait {
     fn l1(&self, other: &Self) -> f32;
     fn l2(&self, other: &Self) -> f32;
-    fn l1_normalize(&mut self);
 }
 
 impl BoWTrait for BoW {
@@ -20,16 +24,5 @@ impl BoWTrait for BoW {
     /// Not sure if needed
     fn l2(&self, _other: &Self) -> f32 {
         unimplemented!()
-    }
-
-    /// Normalize a BoW vector
-    fn l1_normalize(&mut self) {
-        let sum: f32 = self.iter().sum();
-        if sum > 0. {
-            let inv_sum = 1. / sum;
-            for w in self.iter_mut() {
-                *w *= inv_sum;
-            }
-        }
     }
 }

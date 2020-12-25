@@ -142,7 +142,13 @@ impl Vocabulary {
             }
         }
         // Normalize BoW vector
-        bow.l1_normalize();
+        let sum: f32 = bow.iter().sum();
+        if sum > 0. {
+            let inv_sum = 1. / sum;
+            for w in bow.iter_mut() {
+                *w *= inv_sum;
+            }
+        }
 
         Ok(bow)
     }

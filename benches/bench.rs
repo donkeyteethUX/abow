@@ -8,7 +8,7 @@ use abow::{load_img_get_kps, Vocabulary};
 #[bench]
 fn transf(b: &mut Bencher) {
     let voc = Vocabulary::load("vocabs/test.voc").unwrap();
-    let features = load_img_get_kps("../fbow/data/test/image_00508.jpg").unwrap();
+    let features = load_img_get_kps("data/test/0.jpg").unwrap();
     b.iter(|| {
         voc.transform(&features).unwrap();
     });

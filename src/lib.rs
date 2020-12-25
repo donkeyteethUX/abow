@@ -10,8 +10,8 @@ pub use vocab::Vocabulary;
 
 /// Supported descriptor type is 32-bit binary array.
 ///
-/// This is the most commonly used keypoint descriptor data type. 
-/// It is used by ORB and BRIEF, for example. 
+/// This is the most commonly used keypoint descriptor data type.
+/// It is used by ORB and BRIEF, for example.
 ///
 /// In the future support can be added for other binary descriptor sizes.
 pub type Desc = [u8; 32];
