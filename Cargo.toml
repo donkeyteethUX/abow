@@ -8,7 +8,7 @@ edition = "2018"
 keywords = ["slam", "bag of words", "visual odometry", "computer vision", "loop closure"]
 categories = ["algorithms", "computer-vision", "mathematics", "science"]
 description = "Visual bag of words for fast image matching"
-exclude = ["data"]
+exclude = ["data", "vocabs"]
 readme = "README.md"
 license = "MIT"
 
