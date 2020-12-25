@@ -5,6 +5,7 @@ pub mod opencv_utils;
 pub mod vocab;
 
 pub use bow::{BoW, BoWTrait};
+#[cfg(feature = "opencv")]
 pub use opencv_utils::{all_kps_from_dir, load_img_get_kps};
 pub use vocab::Vocabulary;
 
@@ -23,8 +24,10 @@ pub enum BowErr {
     Io(#[from] std::io::Error),
     #[error("Vocabulary Serialization Error")]
     Bincode(#[from] bincode::Error),
+    #[cfg(feature = "opencv")]
     #[error("Opencv Error")]
     OpenCvInternal(#[from] opencv::Error),
+    #[cfg(feature = "opencv")]
     #[error("Opencv Descriptor decode error")]
     OpenCvDecode,
 }

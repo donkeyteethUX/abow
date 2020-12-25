@@ -1,11 +1,10 @@
 [package]
 name = "abow"
-version = "0.1.0"
+version = "0.1.3"
 authors = ["Alex Maiorella <alex@maiorella.org>"]
 repository = "https://github.com/donkeyteethUX/abow"
-homepage = "https://github.com/donkeyteethUX/abow"
 edition = "2018"
-keywords = ["slam", "bag of words", "visual odometry", "computer vision", "loop closure"]
+keywords = ["slam", "bag-of-words", "visual-odometry", "dbow", "loop-closure"]
 categories = ["algorithms", "computer-vision", "mathematics", "science"]
 description = "Visual bag of words for fast image matching"
 exclude = ["data", "vocabs"]
@@ -13,8 +12,7 @@ readme = "README.md"
 license = "MIT"
 
 [features]
-default = ["useopencv"]
-useopencv = ["opencv"]
+default = ["opencv"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -26,11 +24,14 @@ thiserror = "1.0"
 
 [[example]]
 name = "match"
-required-features = ["useopencv"]
+required-features = ["opencv"]
 
 [[example]]
 name = "create-voc"
-required-features = ["useopencv"]
+required-features = ["opencv"]
 
 [profile.release]
 debug = true
+
+[package.metadata.docs.rs]
+no-default-features = true

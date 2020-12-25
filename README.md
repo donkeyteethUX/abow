@@ -1,10 +1,10 @@
 # A Bag of Words
-A rust crate for converting collections of image feature descriptors into a "Bag-of-Words" representation for fast matching of images in localizaton / SLAM systems. Uses heirarchical k-means clustering to create a "vocabulary" of common visual features. The vocabulary can then be used to transform an arbitrary image or collection of image keypoint descriptors into a compact bag of words (bow) vector. Bow vectors can be matched very quickly to give a measure of image similarity.
+A rust crate for converting collections of image feature descriptors into a "Bag-of-Words" representation for fast matching of images in localizaton / SLAM systems. Uses hierarchical k-means clustering to create a "vocabulary" of common visual features. The vocabulary can then be used to transform an arbitrary image or collection of image keypoint descriptors into a compact bag of words (bow) vector. Bow vectors can be matched very quickly to give a measure of image similarity.
 
 ## Setup
 This crate is primarily designed for use with user-provided keypoint descriptors. Currently, 32-bit binary descriptors are supported (ORB or BRIEF are popular examples). However this crate does provide convenience functions to compute ORB descriptors from images, using [opencv](https://github.com/opencv/opencv) and [opencv-rust](https://github.com/twistedfall/opencv-rust/).
 
-These functions can be enabled or disabled using the feature flag "useopencv". This feature is enabled by default, so if you don't want to use opencv, update your Cargo.toml with:
+These functions can be enabled or disabled using the feature flag "opencv". This feature is enabled by default, so if you don't want to use opencv, update your Cargo.toml with:
 ```toml
 abow = {version = "0.1", default-features = false}
 ```
@@ -40,5 +40,5 @@ Match     | Score
 ```
 
 ## References
-This library is largely based on the C++ repositories [DBoW2](https://github.com/dorian3d/DBoW2/) and [fbow](https://github.com/rmsalinas/fbow):
+This library is largely based on the C++ repositories [DBoW2](https://github.com/dorian3d/DBoW2/) and [fbow](https://github.com/rmsalinas/fbow).
 

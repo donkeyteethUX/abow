@@ -6,7 +6,7 @@ fn main() {
     println!("Detected {} ORB keypoints.", features.len());
 
     // Create vocabulary from features
-    let voc = Vocabulary::create(&features, 5, 5).unwrap();
+    let voc = Vocabulary::create(&features, 9, 3).unwrap();
     println!("\nVocabulary = {:#?}", voc);
 
     // Save vocab and load it again just for fun

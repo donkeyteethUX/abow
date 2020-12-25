@@ -1,4 +1,4 @@
-#![cfg(feature = "useopencv")]
+#![cfg(feature = "opencv")]
 use crate::{BowErr, Desc, Result};
 use opencv::{self, core::MatTrait, prelude::Feature2DTrait};
 use std::{convert::TryInto, path::Path};
