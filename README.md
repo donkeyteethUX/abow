@@ -10,7 +10,7 @@ abow = {version = "0.1", default-features = false}
 ```
 Otherwise, you'll need to install OpenCV. Instuctions and troubleshooting are available at https://github.com/twistedfall/opencv-rust.
 
-## Excecutable Examples
+## Executable Examples
 Create a descriptor vocabulary from a set of images and save it:
 ```console
 foo@bar:~/repos/ABoW$ cargo run --release --example create-voc
