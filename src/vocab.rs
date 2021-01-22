@@ -6,7 +6,7 @@ use std::{fmt, path::Path};
 
 use crate::*;
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
 /// Feature vocabulary built from a collection of image keypoint descriptors. Can be:
 /// 1. Created.
 /// 2. Saved to a file.
@@ -20,13 +20,13 @@ pub struct Vocabulary {
     num_leaves: usize,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 struct Block {
     id: NodeId,
     children: Children,
 }
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
 struct Children {
     features: Vec<Desc>,
     weights: Vec<f32>,
@@ -34,10 +34,10 @@ struct Children {
     ids: Vec<NodeId>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 enum NodeId {
     Block(usize),
-    Leaf(usize),
+    Leaf(Vec<usize>),
 }
 
 impl NodeId {
@@ -122,17 +122,18 @@ impl Vocabulary {
                         best = (d, child)
                     }
                 }
-                match block.children.ids[best.1] {
+                match &block.children.ids[best.1] {
                     NodeId::Block(id) => {
-                        block = &self.blocks[id];
+                        block = &self.blocks[*id];
                     }
-                    NodeId::Leaf(word_id) => {
+                    NodeId::Leaf(ids) => {
+                        let word_id = ids.last().unwrap();
                         // add word/leaf id and weight to result
                         let weight = block.children.weights[best.1];
-                        match bow.get_mut(word_id - 1) {
+                        match bow.get_mut(*word_id) {
                             Some(w) => *w += weight,
                             None => {
-                                bow[word_id - 1] = weight;
+                                bow[*word_id] = weight;
                             }
                         }
                         break;
@@ -153,6 +154,63 @@ impl Vocabulary {
         Ok(bow)
     }
 
+    // struct DirectIdx {
+    //     blocks: Vec<usize>,
+    //     leaf: usize,
+    // }
+
+    /// Transform a vector of binary descriptors into its bag of words
+    /// representation with respect to the Vocabulary. Descriptor is l1 normalized.
+    pub fn transform_with_direct_idx(&self, features: &Vec<Desc>) -> Result<(BoW, DirectIdx)> {
+        let mut bow: BoW = vec![0.; self.num_leaves];
+        let mut direct_idx: DirectIdx = Vec::new();
+        for feature in features {
+            let mut block = &self.blocks[0];
+            let mut best: (u8, usize) = (u8::MAX, 0);
+            // traverse tree
+            loop {
+                for child in 0..block.children.ids.len() {
+                    let child_feat = &block.children.features[child];
+                    let d = Self::hamming(feature, child_feat);
+                    if d < best.0 {
+                        best = (d, child)
+                    }
+                }
+                match &block.children.ids[best.1] {
+                    NodeId::Block(id) => {
+                        block = &self.blocks[*id];
+                    }
+                    NodeId::Leaf(ids) => {
+                        // add word parent ids to direct index
+                        direct_idx.push(ids.clone());
+                        // add word/leaf id and weight to result
+                        let word_id = ids.last().unwrap();
+                        let weight = block.children.weights[best.1];
+                        match bow.get_mut(*word_id) {
+                            Some(w) => *w += weight,
+                            None => {
+                                bow[*word_id] = weight;
+                            }
+                        }
+                        break;
+                    }
+                }
+                best = (u8::MAX, 0);
+            }
+        }
+        // Normalize BoW vector
+        let sum: f32 = bow.iter().sum();
+        if sum > 0. {
+            let inv_sum = 1. / sum;
+            for w in bow.iter_mut() {
+                *w *= inv_sum;
+            }
+        }
+
+        // println!("direct_idx: {:?}", direct_idx);
+        Ok((bow, direct_idx))
+    }
+
     /// Build a vocabulary from a collection of descriptors.
     ///
     /// # Arguments
@@ -164,7 +222,7 @@ impl Vocabulary {
         let mut v = Self::empty(k, l);
 
         // Build with recursive k-means clustering of features
-        v.cluster(features, &NodeId::Block(0), 1);
+        v.cluster(features, vec![0], 1);
 
         // Sort by block id
         v.blocks.sort_by(|a, b| a.id.get_bid().cmp(&b.id.get_bid()));
@@ -172,11 +230,11 @@ impl Vocabulary {
         Ok(v)
     }
 
-    fn cluster(&mut self, features: &Vec<Desc>, parent_id: &NodeId, curr_level: usize) {
+    fn cluster(&mut self, features: &Vec<Desc>, parent_ids: Vec<usize>, curr_level: usize) {
         println!(
-            "KMeans step with {} features. parent id: {:?}, level {}",
+            "KMeans step with {} features. parents: {:?}, level {}",
             features.len(),
-            parent_id,
+            parent_ids,
             curr_level
         );
         if features.is_empty() {
@@ -231,7 +289,7 @@ impl Vocabulary {
         // Create block
         let ids: Vec<_> = groups
             .iter()
-            .map(|g| self.next_node_id(curr_level == self.l || g.len() == 1))
+            .map(|g| self.next_node_id(curr_level == self.l || g.len() == 1, &parent_ids))
             .collect();
 
         let children = Children {
@@ -241,7 +299,7 @@ impl Vocabulary {
             features: clusters,
         };
         let block = Block {
-            id: *parent_id,
+            id: NodeId::Block(*parent_ids.last().unwrap()),
             children,
         };
         self.blocks.push(block);
@@ -253,8 +311,15 @@ impl Vocabulary {
                 .filter(|&n| matches!(n, NodeId::Block(_)))
                 .enumerate()
             {
+                // get features from child cluster
                 let features: Vec<Desc> = groups[i].iter().map(|&j| features[j]).collect();
-                self.cluster(&features, id, curr_level + 1);
+
+                // update parent ids
+                let mut ids = parent_ids.clone();
+                ids.push(id.get_bid());
+
+                // cluster on child cluster
+                self.cluster(&features, ids, curr_level + 1);
             }
         }
     }
@@ -300,11 +365,15 @@ impl Vocabulary {
     }
 
     /// Provide the next NodeId, either leaf/word or block.
-    fn next_node_id(&mut self, leaf: bool) -> NodeId {
+    fn next_node_id(&mut self, leaf: bool, parent_ids: &Vec<usize>) -> NodeId {
         match leaf {
             true => {
+                // Leaf node will hold the block ids of its parents in addition to leaf id, to facilitate getting direct index later
+                let mut new_parent_ids = parent_ids[1..].to_vec(); // Clone ids but drop the first parent which is always 0
+                new_parent_ids.push(self.num_leaves); // Add leaf id
+                // println!("new leaf node ids : {:?}", new_parent_ids);
                 self.num_leaves += 1;
-                NodeId::Leaf(self.num_leaves)
+                NodeId::Leaf(new_parent_ids)
             }
             false => {
                 self.num_blocks += 1;

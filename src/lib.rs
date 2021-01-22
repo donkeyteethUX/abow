@@ -4,7 +4,7 @@ pub mod bow;
 pub mod opencv_utils;
 pub mod vocab;
 
-pub use bow::{BoW, BoWTrait};
+pub use bow::{BoW, BoWTrait, DirectIdx};
 #[cfg(feature = "opencv")]
 pub use opencv_utils::{all_kps_from_dir, load_img_get_kps};
 pub use vocab::Vocabulary;

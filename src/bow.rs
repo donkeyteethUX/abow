@@ -5,6 +5,9 @@
 /// Value: total weight of that word in provided features.
 pub type BoW = Vec<f32>;
 
+
+pub type DirectIdx = Vec<Vec<usize>>;
+
 /// Provides method(s) for computing the similarity score between bow vectors.
 pub trait BoWTrait {
     fn l1(&self, other: &Self) -> f32;
