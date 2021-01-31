@@ -3,7 +3,7 @@ use bincode;
 use bitvec::{order::Msb0, view::BitView};
 use rand::{seq::SliceRandom, thread_rng};
 use serde::{Deserialize, Serialize};
-use std::{fmt, path::Path};
+use std::fmt;
 
 use crate::*;
 
@@ -11,7 +11,7 @@ use crate::*;
 /// Feature vocabulary built from a collection of image keypoint descriptors. Can be:
 /// 1. Created.
 /// 2. Saved to a file & loaded from a file (requires bincode feature, enabled by default).
-/// 3. Used to transform a new set of descriptors into a BoW representation (and 
+/// 3. Used to transform a new set of descriptors into a BoW representation (and
 ///    optionally get DirectIndex from features to nodes).
 pub struct Vocabulary {
     blocks: Vec<Block>,
@@ -59,7 +59,7 @@ impl Vocabulary {
 
     /// Load an ABoW vocabulary from a file
     #[cfg(feature = "bincode")]
-    pub fn load<P: AsRef<Path>>(file: P) -> Result<Self> {
+    pub fn load<P: AsRef<std::path::Path>>(file: P) -> Result<Self> {
         let mut file = std::fs::File::open(file)?;
         let mut buffer: Vec<u8> = Vec::new();
         std::io::Read::read_to_end(&mut file, &mut buffer)?;
@@ -68,7 +68,7 @@ impl Vocabulary {
 
     /// Save vocabulary to a file
     #[cfg(feature = "bincode")]
-    pub fn save<P: AsRef<Path>>(&self, file: P) -> Result<()> {
+    pub fn save<P: AsRef<std::path::Path>>(&self, file: P) -> Result<()> {
         let serialized = bincode::serialize(&self)?;
         let mut file = std::fs::File::create(file)?;
         std::io::Write::write_all(&mut file, &serialized)?;
