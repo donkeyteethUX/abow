@@ -109,18 +109,19 @@ impl Vocabulary {
         let mut bow: BoW = vec![0.; self.num_leaves];
         let mut direct_idx: DirectIdx = Vec::new();
         for feature in features {
+            // start at root block
             let mut block = &self.blocks[0];
-            let mut best: (u8, usize) = (u8::MAX, 0);
+
             // traverse tree
             loop {
-                for child in 0..block.children.ids.len() {
-                    let child_feat = &block.children.features[child];
+                let mut best_child: (u8, usize) = (u8::MAX, 0);
+                for (child, child_feat) in block.children.features.iter().enumerate() {
                     let d = Self::hamming(feature, child_feat);
-                    if d < best.0 {
-                        best = (d, child)
+                    if d < best_child.0 {
+                        best_child = (d, child)
                     }
                 }
-                match &block.children.ids[best.1] {
+                match &block.children.ids[best_child.1] {
                     NodeId::Block(id) => {
                         block = &self.blocks[*id];
                     }
@@ -130,18 +131,17 @@ impl Vocabulary {
                             direct_idx.push(ids.clone());
                         }
                         // add word/leaf id and weight to result
-                        let word_id = ids.last().unwrap();
-                        let weight = block.children.weights[best.1];
-                        match bow.get_mut(*word_id) {
+                        let word_id = *ids.last().unwrap();
+                        let weight = block.children.weights[best_child.1];
+                        match bow.get_mut(word_id) {
                             Some(w) => *w += weight,
                             None => {
-                                bow[*word_id] = weight;
+                                bow[word_id] = weight;
                             }
                         }
                         break;
                     }
                 }
-                best = (u8::MAX, 0);
             }
         }
         // Normalize BoW vector
