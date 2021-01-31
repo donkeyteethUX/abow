@@ -12,15 +12,18 @@ fn main() {
 
     // Create BoW vectors from the test data. Save file name for demonstration.
     let mut bows: Vec<(PathBuf, BoW)> = Vec::new();
-    for entry in Path::new("data/test").read_dir().expect("Error").take(6) {
+    for entry in Path::new("data/test").read_dir().expect("Error") {
         if let Ok(entry) = entry {
             let new_feat = load_img_get_kps(&entry.path()).unwrap();
-            bows.push((entry.path(), voc.transform_with_direct_idx(&new_feat).unwrap().0));
+            bows.push((
+                entry.path(),
+                voc.transform_with_direct_idx(&new_feat).unwrap().0,
+            ));
         }
     }
 
-    // Match every image to every other image
-    for (f1, bow1) in bows.iter() {
+    // Compare a few images to the the while colection, using L1 norm
+    for (f1, bow1) in bows.iter().take(5) {
         let mut scores: Vec<(f32, &OsStr)> = Vec::new();
         for (f2, bow2) in bows.iter() {
             let d = bow1.l1(bow2);

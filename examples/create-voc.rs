@@ -1,7 +1,7 @@
 use abow::{all_kps_from_dir, vocab::Vocabulary};
 
 fn main() {
-    // Extract orb descriptors from imges
+    // Extract orb descriptors from images
     let features = all_kps_from_dir("data/train").unwrap();
     println!("Detected {} ORB keypoints.", features.len());
 

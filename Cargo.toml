@@ -12,26 +12,30 @@ readme      = "README.md"
 license     = "MIT"
 
 [features]
-default = ["opencv"]
+default = ["opencv", "bincode"]
 
 [dependencies]
-serde     = { version = "1.0", features = ["derive"] }
-opencv    = { version = "0.48", optional = true }
-bitvec    = "0.20"
-rand      = "0.8"
-bincode   = "1.3"
+serde   = { version = "1.0", features = ["derive"] }
+opencv  = { version = "0.48", optional = true }
+bincode = { version = "1.3", optional = true }
+bitvec  = "0.20"
+rand    = "0.8"
+
 thiserror = "1.0"
 
 [[example]]
 name              = "match"
-required-features = ["opencv"]
+required-features = ["opencv", "bincode"]
 
 [[example]]
 name              = "create-voc"
-required-features = ["opencv"]
+required-features = ["opencv", "bincode"]
 
 [profile.release]
 debug = true
 
 [package.metadata.docs.rs]
 no-default-features = true
+
+[profile.bench]
+debug = true
