@@ -1,5 +1,5 @@
 #![cfg(feature = "opencv")]
-use crate::{BowErr, Desc, Result};
+use crate::{BowErr, Desc, BowResult};
 use opencv::{self, core::MatTrait, prelude::Feature2DTrait};
 use std::{convert::TryInto, path::Path};
 
@@ -7,7 +7,7 @@ type CvImage = opencv::prelude::Mat;
 type CvMat = opencv::core::Mat;
 
 /// Extract orb keypoint descriptors from an image. Mostly for testing & example purposes.
-fn orb_from_cvimage(cv_img: &CvImage) -> Result<Vec<Desc>> {
+fn orb_from_cvimage(cv_img: &CvImage) -> BowResult<Vec<Desc>> {
     // Create detector
     let mut orb = opencv::features2d::ORB::default().unwrap();
 
@@ -33,7 +33,7 @@ fn orb_from_cvimage(cv_img: &CvImage) -> Result<Vec<Desc>> {
 }
 
 /// Use opencv to load an image and extract orb keypoint descriptors.
-pub fn load_img_get_kps<P: AsRef<Path>>(path: P) -> Result<Vec<Desc>> {
+pub fn load_img_get_kps<P: AsRef<Path>>(path: P) -> BowResult<Vec<Desc>> {
     let img: CvImage = opencv::imgcodecs::imread(
         &path.as_ref().to_str().unwrap(),
         opencv::imgcodecs::IMREAD_GRAYSCALE,
@@ -43,7 +43,7 @@ pub fn load_img_get_kps<P: AsRef<Path>>(path: P) -> Result<Vec<Desc>> {
 }
 
 /// Extract orb keypoint descriptors from all images in directory using opencv.
-pub fn all_kps_from_dir<P: AsRef<Path>>(path: P) -> Result<Vec<Desc>> {
+pub fn all_kps_from_dir<P: AsRef<Path>>(path: P) -> BowResult<Vec<Desc>> {
     let mut features: Vec<Desc> = Vec::new();
     for entry in path.as_ref().read_dir()? {
         if let Ok(entry) = entry {

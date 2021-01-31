@@ -1,3 +1,4 @@
+use smallvec;
 use thiserror::Error;
 
 /// Implementation of a visual bag-of-words vocabulary,
@@ -30,7 +31,7 @@ pub type BoW = Vec<f32>;
 /// The direct index for `feature[i]` is `di = DirectIdx[i]` where
 /// `di.len() <= l` (number of levels), and `di[j]` is the id of the node matching `feature[i]`
 /// at level `j` in the Vocabulary tree.
-pub type DirectIdx = Vec<Vec<usize>>;
+pub type DirectIdx<const L: usize> = Vec<smallvec::SmallVec<[usize; L]>>;
 
 /// Provides method(s) for computing the similarity score between bow vectors.
 pub trait BoWTrait {
@@ -54,7 +55,7 @@ impl BoWTrait for BoW {
     }
 }
 
-type Result<T> = std::result::Result<T, BowErr>;
+type BowResult<T> = std::result::Result<T, BowErr>;
 #[derive(Error, Debug)]
 pub enum BowErr {
     #[error("Io Error")]

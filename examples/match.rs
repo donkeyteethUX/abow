@@ -6,8 +6,9 @@ use std::{
 use abow::*;
 
 fn main() {
+    const LEVELS: usize = 3;
     // Load existing vocabulary
-    let voc = Vocabulary::load("vocabs/test.voc").unwrap();
+    let voc = Vocabulary::<LEVELS>::load("vocabs/test.voc").unwrap();
     println!("Vocabulary: {:#?}", voc);
 
     // Create BoW vectors from the test data. Save file name for demonstration.

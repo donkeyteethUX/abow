@@ -21,6 +21,7 @@ bincode   = { version = "1.3", optional = true }
 bitvec    = "0.20"
 rand      = "0.8"
 thiserror = "1.0"
+smallvec  = { version = "1.6", features = ["const_generics"] }
 
 [[example]]
 name              = "match"

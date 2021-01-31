@@ -3,6 +3,7 @@ use bincode;
 use bitvec::{order::Msb0, view::BitView};
 use rand::{seq::SliceRandom, thread_rng};
 use serde::{Deserialize, Serialize};
+use smallvec::{SmallVec, ToSmallVec};
 use std::fmt;
 
 use crate::*;
@@ -13,19 +14,18 @@ use crate::*;
 /// 2. Saved to a file & loaded from a file (requires bincode feature, enabled by default).
 /// 3. Used to transform a new set of descriptors into a BoW representation (and
 ///    optionally get DirectIndex from features to nodes).
-pub struct Vocabulary {
-    blocks: Vec<Block>,
+pub struct Vocabulary<const L: usize> {
+    blocks: Vec<Block<L>>,
     k: usize,
-    l: usize,
     num_blocks: usize,
     num_leaves: usize,
 }
 
 /// Vocabulary API
-impl Vocabulary {
+impl<const L: usize> Vocabulary<{ L }> {
     /// Transform a vector of binary descriptors into its bag of words
     /// representation with respect to the Vocabulary. Descriptor is l1 normalized.
-    pub fn transform(&self, features: &Vec<Desc>) -> Result<BoW> {
+    pub fn transform(&self, features: &Vec<Desc>) -> BowResult<BoW> {
         self.transform_generic(features, false).map(|(bow, _)| bow)
     }
 
@@ -37,16 +37,19 @@ impl Vocabulary {
     /// The direct index for `feature[i]` is `di = DirectIdx[i]` where
     /// `di.len() <= l` (number of levels), and `di[j]` is the id of the node matching `feature[i]`
     /// at level `j` in the Vocabulary tree.
-    pub fn transform_with_direct_idx(&self, features: &Vec<Desc>) -> Result<(BoW, DirectIdx)> {
+    pub fn transform_with_direct_idx(
+        &self,
+        features: &Vec<Desc>,
+    ) -> BowResult<(BoW, DirectIdx<L>)> {
         self.transform_generic(features, true)
     }
 
     /// Build a vocabulary from a collection of descriptors.
     ///
     /// Args: (k: Branching factor, l: Max number of levels)
-    pub fn create(features: &Vec<Desc>, k: usize, l: usize) -> Result<Self> {
+    pub fn create(features: &Vec<Desc>, k: usize) -> BowResult<Self> {
         // Start with root of tree
-        let mut v = Self::empty(k, l);
+        let mut v = Self::empty(k);
 
         // Build with recursive k-means clustering of features
         v.cluster(features, vec![0], 1);
@@ -59,7 +62,7 @@ impl Vocabulary {
 
     /// Load an ABoW vocabulary from a file
     #[cfg(feature = "bincode")]
-    pub fn load<P: AsRef<std::path::Path>>(file: P) -> Result<Self> {
+    pub fn load<P: AsRef<std::path::Path>>(file: P) -> BowResult<Self> {
         let mut file = std::fs::File::open(file)?;
         let mut buffer: Vec<u8> = Vec::new();
         std::io::Read::read_to_end(&mut file, &mut buffer)?;
@@ -68,7 +71,7 @@ impl Vocabulary {
 
     /// Save vocabulary to a file
     #[cfg(feature = "bincode")]
-    pub fn save<P: AsRef<std::path::Path>>(&self, file: P) -> Result<()> {
+    pub fn save<P: AsRef<std::path::Path>>(&self, file: P) -> BowResult<()> {
         let serialized = bincode::serialize(&self)?;
         let mut file = std::fs::File::create(file)?;
         std::io::Write::write_all(&mut file, &serialized)?;
@@ -81,33 +84,68 @@ impl Vocabulary {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 /// A unit representing a non-leaf node in the vocabulary
-struct Block {
-    id: NodeId,
-    children: Children,
+struct Block<const L: usize> {
+    id: NodeId<L>,
+    children: Children<L>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
 /// Data structure representing the child nodes of a block, which may
 /// or may not be leaves
-struct Children {
+struct Children<const L: usize> {
     features: Vec<Desc>,
     weights: Vec<f32>,
     cluster_size: Vec<usize>,
-    ids: Vec<NodeId>,
+    ids: Vec<NodeId<L>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 /// Unique identifier for a node. The Leaf variant stores ids of all its parents,
 /// which is equivalent to the DirectIndex for any feature matching that leaf.
-enum NodeId {
+enum NodeId<const L: usize> {
+    Block(usize),
+    Leaf(SmallVec<[usize; L]>),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Unique identifier for a node. The Leaf variant stores ids of all its parents,
+/// which is equivalent to the DirectIndex for any feature matching that leaf.
+enum SerializableNodeId {
     Block(usize),
     Leaf(Vec<usize>),
 }
 
-impl Vocabulary {
-    fn transform_generic(&self, features: &Vec<Desc>, di: bool) -> Result<(BoW, DirectIdx)> {
+impl<const L: usize> Serialize for NodeId<{ L }> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let ser = match self {
+            NodeId::Block(id) => SerializableNodeId::Block(*id),
+            NodeId::Leaf(l_id) => SerializableNodeId::Leaf(l_id.to_vec()),
+        };
+
+        ser.serialize(serializer)
+    }
+}
+impl<'de, const L: usize> Deserialize<'de> for NodeId<{ L }> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let ser = SerializableNodeId::deserialize(deserializer)?;
+
+        Ok(match ser {
+            SerializableNodeId::Block(id) => NodeId::Block(id),
+            SerializableNodeId::Leaf(l_id) => NodeId::Leaf(l_id.to_smallvec()),
+        })
+    }
+}
+
+impl<const L: usize> Vocabulary<{ L }> {
+    fn transform_generic(&self, features: &Vec<Desc>, di: bool) -> BowResult<(BoW, DirectIdx<L>)> {
         let mut bow: BoW = vec![0.; self.num_leaves];
-        let mut direct_idx: DirectIdx = Vec::new();
+        let mut direct_idx: DirectIdx<L> = Vec::with_capacity(features.len());
         for feature in features {
             // start at root block
             let mut block = &self.blocks[0];
@@ -215,7 +253,7 @@ impl Vocabulary {
         // Create block
         let ids: Vec<_> = groups
             .iter()
-            .map(|g| self.next_node_id(curr_level == self.l || g.len() == 1, &parent_ids))
+            .map(|g| self.next_node_id(curr_level == L || g.len() == 1, &parent_ids))
             .collect();
 
         let children = Children {
@@ -231,7 +269,7 @@ impl Vocabulary {
         self.blocks.push(block);
 
         // Recurse
-        if curr_level < self.l {
+        if curr_level < L {
             for (i, id) in ids
                 .iter()
                 .filter(|&n| matches!(n, NodeId::Block(_)))
@@ -290,11 +328,11 @@ impl Vocabulary {
     }
 
     /// Provide the next NodeId, either leaf/word or block.
-    fn next_node_id(&mut self, leaf: bool, parent_ids: &Vec<usize>) -> NodeId {
+    fn next_node_id(&mut self, leaf: bool, parent_ids: &Vec<usize>) -> NodeId<L> {
         match leaf {
             true => {
                 // Leaf node will hold the block ids of its parents in addition to leaf id, to facilitate getting direct index later
-                let mut new_parent_ids = parent_ids[1..].to_vec(); // Clone ids but drop the first parent which is always 0
+                let mut new_parent_ids = parent_ids[1..].to_smallvec(); // Clone ids but drop the first parent which is always 0
                 new_parent_ids.push(self.num_leaves); // Add leaf id
                 self.num_leaves += 1;
                 NodeId::Leaf(new_parent_ids)
@@ -305,18 +343,17 @@ impl Vocabulary {
             }
         }
     }
-    fn empty(k: usize, l: usize) -> Self {
+    fn empty(k: usize) -> Self {
         Self {
             blocks: Vec::new(),
             k,
-            l,
             num_blocks: 0,
             num_leaves: 0,
         }
     }
 }
 
-impl NodeId {
+impl<const L: usize> NodeId<L> {
     fn get_bid(&self) -> usize {
         match self {
             NodeId::Block(i) => *i,
@@ -325,7 +362,7 @@ impl NodeId {
     }
 }
 
-impl fmt::Debug for Children {
+impl<const L: usize> fmt::Debug for Children<L> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Children")
             .field("ids", &self.ids)
@@ -335,7 +372,7 @@ impl fmt::Debug for Children {
     }
 }
 
-impl fmt::Debug for Vocabulary {
+impl<const L: usize> fmt::Debug for Vocabulary<{ L }> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut clust_sizes: Vec<usize> = Vec::new();
         for b in self.blocks.iter() {
@@ -349,7 +386,7 @@ impl fmt::Debug for Vocabulary {
         f.debug_struct("Vocabulary")
             .field("Word/Leaf Nodes", &self.num_leaves)
             .field("Other Nodes", &self.num_blocks)
-            .field("Levels", &self.l)
+            .field("Levels", &L)
             .field("Branching Factor", &self.k)
             .field("Total Training Features", &sum)
             .field(
