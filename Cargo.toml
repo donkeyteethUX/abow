@@ -1,6 +1,6 @@
 [package]
 name        = "abow"
-version     = "0.2.0"
+version     = "0.3.0"
 authors     = ["Alex Maiorella <alex@maiorella.org>"]
 repository  = "https://github.com/donkeyteethUX/abow"
 edition     = "2018"

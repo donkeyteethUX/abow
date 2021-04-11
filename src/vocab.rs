@@ -247,7 +247,7 @@ impl Vocabulary {
         }
     }
 
-    /// Initialize clusters for kmeans. Options: random or k-means++.
+    /// Initialize clusters for kmeans
     fn initialize_clusters(&self, features: &[Desc], method: ClusterInitMethod) -> Vec<Desc> {
         // if fewer than k unique features, simply return them
         if features.len() <= self.k {
