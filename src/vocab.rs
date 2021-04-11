@@ -1,11 +1,21 @@
 #[cfg(feature = "bincode")]
-use bincode;
 use bitvec::{order::Msb0, view::BitView};
-use rand::{seq::SliceRandom, thread_rng};
+use rand::{
+    distributions::{weighted::WeightedIndex, Distribution},
+    seq::SliceRandom,
+    thread_rng, Rng,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use crate::*;
+
+enum ClusterInitMethod {
+    #[allow(dead_code)]
+    Random,
+    #[allow(clippy::upper_case_acronyms)]
+    KMeansPP,
+}
 
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
 /// Feature vocabulary built from a collection of image keypoint descriptors. Can be:
@@ -25,8 +35,8 @@ pub struct Vocabulary {
 impl Vocabulary {
     /// Transform a vector of binary descriptors into its bag of words
     /// representation with respect to the Vocabulary. Descriptor is l1 normalized.
-    pub fn transform(&self, features: &Vec<Desc>) -> Result<BoW> {
-        self.transform_generic(features, false).map(|(bow, _)| bow)
+    pub fn transform(&self, features: &[Desc]) -> Result<BoW> {
+        Ok(self.transform_generic(features, false).0)
     }
 
     /// Transform a vector of binary descriptors into its bag of words
@@ -37,14 +47,14 @@ impl Vocabulary {
     /// The direct index for `feature[i]` is `di = DirectIdx[i]` where
     /// `di.len() <= l` (number of levels), and `di[j]` is the id of the node matching `feature[i]`
     /// at level `j` in the Vocabulary tree.
-    pub fn transform_with_direct_idx(&self, features: &Vec<Desc>) -> Result<(BoW, DirectIdx)> {
-        self.transform_generic(features, true)
+    pub fn transform_with_direct_idx(&self, features: &[Desc]) -> Result<(BoW, DirectIdx)> {
+        Ok(self.transform_generic(features, true))
     }
 
     /// Build a vocabulary from a collection of descriptors.
     ///
     /// Args: (k: Branching factor, l: Max number of levels)
-    pub fn create(features: &Vec<Desc>, k: usize, l: usize) -> Result<Self> {
+    pub fn create(features: &[Desc], k: usize, l: usize) -> Result<Self> {
         // Start with root of tree
         let mut v = Self::empty(k, l);
 
@@ -76,8 +86,8 @@ impl Vocabulary {
     }
 }
 
-/////////////////////                Helpers                 ////////////////////////
-/////////////////////////////////////////////////////////////////////////////////////
+//###################                Helpers                 #########################
+//####################################################################################
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 /// A unit representing a non-leaf node in the vocabulary
@@ -105,7 +115,7 @@ enum NodeId {
 }
 
 impl Vocabulary {
-    fn transform_generic(&self, features: &Vec<Desc>, di: bool) -> Result<(BoW, DirectIdx)> {
+    fn transform_generic(&self, features: &[Desc], di: bool) -> (BoW, DirectIdx) {
         let mut bow: BoW = vec![0.; self.num_leaves];
         let mut direct_idx: DirectIdx = Vec::new();
         for feature in features {
@@ -153,71 +163,58 @@ impl Vocabulary {
             }
         }
 
-        Ok((bow, direct_idx))
+        (bow, direct_idx)
     }
 
-    fn cluster(&mut self, features: &Vec<Desc>, parent_ids: Vec<usize>, curr_level: usize) {
-        println!(
-            "KMeans step with {} features. parents: {:?}, level {}",
-            features.len(),
-            parent_ids,
-            curr_level
-        );
-        if features.is_empty() {
-            return;
-        }
-        let mut clusters: Vec<Desc> = Vec::new();
-        let mut groups: Vec<Vec<usize>> = Vec::new();
+    fn cluster(&mut self, features: &[Desc], parent_ids: Vec<usize>, curr_level: usize) {
+        // println!(
+        //     "KMeans step with {} features. parents: {:?}, level {}",
+        //     features.len(),
+        //     parent_ids,
+        //     curr_level
+        // );
 
-        if features.len() <= self.k {
-            // Only one feature per cluster
+        let mut clusters = self.initialize_clusters(features, ClusterInitMethod::KMeansPP);
+        let mut groups = vec![Vec::new(); clusters.len()];
+
+        loop {
+            let mut new_groups: Vec<Vec<usize>> = vec![Vec::new(); groups.len()];
             for (i, f) in features.iter().enumerate() {
-                clusters.push(*f);
-                groups.push(vec![i]);
-            }
-        } else {
-            // Proceed with kmeans clustering
-            clusters = self.initialize_clusters(features);
-            groups = vec![Vec::new(); self.k];
-
-            loop {
-                let mut new_groups: Vec<Vec<usize>> = vec![Vec::new(); self.k];
-                for (i, f) in features.iter().enumerate() {
-                    let mut best: (usize, u8) = (0, u8::MAX);
-                    for (j, c) in clusters.iter().enumerate() {
-                        let d = Self::hamming(c, f);
-                        if d < best.1 {
-                            best = (j, d);
-                        }
+                let mut best: (usize, u8) = (0, u8::MAX);
+                for (j, c) in clusters.iter().enumerate() {
+                    let d = Self::hamming(c, f);
+                    if d < best.1 {
+                        best = (j, d);
                     }
-                    new_groups[best.0].push(i);
                 }
-
-                if groups == new_groups {
-                    break; // converged
-                }
-
-                // update clusters
-                clusters = new_groups
-                    .iter()
-                    .map(|group| {
-                        let desc = group
-                            .iter()
-                            .map(|&i| features.get(i).unwrap())
-                            .collect::<Vec<&Desc>>();
-                        Self::desc_mean(desc)
-                    })
-                    .collect();
-                groups = new_groups;
+                new_groups[best.0].push(i);
             }
+
+            if groups == new_groups {
+                break; // converged
+            }
+
+            // update clusters
+            clusters = new_groups
+                .iter()
+                .map(|group| {
+                    let desc = group.iter().map(|&i| &features[i]).collect();
+                    Self::desc_mean(desc)
+                })
+                .collect();
+            groups = new_groups;
         }
 
-        // Create block
+        // remove empty groups which rarely occur
+        groups.retain(|g| !g.is_empty());
+        clusters.retain(|c| c != &[0_u8; std::mem::size_of::<Desc>()]);
+        assert_eq!(groups.len(), clusters.len());
+
+        // create block
         let ids: Vec<_> = groups
             .iter()
             .map(|g| self.next_node_id(curr_level == self.l || g.len() == 1, &parent_ids))
             .collect();
-
         let children = Children {
             weights: vec![1.; groups.len()],
             ids: ids.clone(),
@@ -230,12 +227,12 @@ impl Vocabulary {
         };
         self.blocks.push(block);
 
-        // Recurse
+        // recurse
         if curr_level < self.l {
             for (i, id) in ids
                 .iter()
-                .filter(|&n| matches!(n, NodeId::Block(_)))
                 .enumerate()
+                .filter(|&(_, n)| matches!(n, NodeId::Block(_)))
             {
                 // get features from child cluster
                 let features: Vec<Desc> = groups[i].iter().map(|&j| features[j]).collect();
@@ -244,20 +241,65 @@ impl Vocabulary {
                 let mut ids = parent_ids.clone();
                 ids.push(id.get_bid());
 
-                // cluster on child cluster
+                // perform clustering on child features
                 self.cluster(&features, ids, curr_level + 1);
             }
         }
     }
 
-    /// Initialize clusters for kmeans. Currently uses random initialization. todo: kmeans++
-    fn initialize_clusters(&self, features: &Vec<Desc>) -> Vec<Desc> {
+    /// Initialize clusters for kmeans. Options: random or k-means++.
+    fn initialize_clusters(&self, features: &[Desc], method: ClusterInitMethod) -> Vec<Desc> {
+        // if fewer than k unique features, simply return them
+        if features.len() <= self.k {
+            return features.to_vec();
+        }
+
+        let mut deduped = features.to_vec();
+        deduped.sort_unstable();
+        deduped.dedup();
+
+        if deduped.len() <= self.k {
+            return deduped;
+        }
+
+        match method {
+            ClusterInitMethod::Random => self.init_random(features),
+            ClusterInitMethod::KMeansPP => self.init_kmeanspp(features),
+        }
+    }
+
+    fn init_random(&self, features: &[Desc]) -> Vec<Desc> {
         let mut rng = thread_rng();
         features
-            .as_slice()
             .choose_multiple(&mut rng, self.k)
             .cloned()
             .collect()
+    }
+
+    fn init_kmeanspp(&self, features: &[Desc]) -> Vec<Desc> {
+        let mut rng = thread_rng();
+        let mut features = features.to_owned();
+        let mut centroids = Vec::with_capacity(self.k);
+        // 1. Randomly select the first centroid.
+        let random_idx = rng.gen_range(0..features.len());
+        centroids.push(features.remove(random_idx));
+
+        while centroids.len() < self.k {
+            // 2. For each data point compute its distance from the nearest, previously chosen centroid.
+            let mut dists: Vec<f32> = vec![std::u8::MAX as f32; features.len()];
+            for (i, f) in features.iter().enumerate() {
+                for c in centroids.iter() {
+                    dists[i] = f32::min(Vocabulary::hamming(f, c) as f32, dists[i]);
+                }
+            }
+            // 3. Select the next centroid from the data points such that the probability of choosing a point
+            // as centroid is directly proportional to its distance from the nearest, previously chosen centroid.
+            let centroid_weights = WeightedIndex::new(dists).expect("weighted index err");
+            let weighted_random_idx = centroid_weights.sample(&mut rng);
+            centroids.push(features.remove(weighted_random_idx));
+        }
+
+        centroids
     }
 
     #[inline]
@@ -290,7 +332,7 @@ impl Vocabulary {
     }
 
     /// Provide the next NodeId, either leaf/word or block.
-    fn next_node_id(&mut self, leaf: bool, parent_ids: &Vec<usize>) -> NodeId {
+    fn next_node_id(&mut self, leaf: bool, parent_ids: &[usize]) -> NodeId {
         match leaf {
             true => {
                 // Leaf node will hold the block ids of its parents in addition to leaf id, to facilitate getting direct index later
@@ -346,6 +388,7 @@ impl fmt::Debug for Vocabulary {
             }
         }
         let sum = clust_sizes.iter().sum::<usize>();
+        clust_sizes.sort_unstable();
         f.debug_struct("Vocabulary")
             .field("Word/Leaf Nodes", &self.num_leaves)
             .field("Other Nodes", &self.num_blocks)
@@ -361,6 +404,10 @@ impl fmt::Debug for Vocabulary {
                 &(clust_sizes.iter().max().unwrap()),
             )
             .field("Mean Word Cluster Size", &(sum / clust_sizes.len()))
+            .field(
+                "Median Word Cluster Size",
+                &clust_sizes[clust_sizes.len() / 2],
+            )
             .finish()
     }
 }
