@@ -35,7 +35,7 @@ fn orb_from_cvimage(cv_img: &CvImage) -> BowResult<Vec<Desc>> {
 /// Use opencv to load an image and extract orb keypoint descriptors.
 pub fn load_img_get_kps<P: AsRef<Path>>(path: P) -> BowResult<Vec<Desc>> {
     let img: CvImage = opencv::imgcodecs::imread(
-        &path.as_ref().to_str().unwrap(),
+        path.as_ref().to_str().unwrap(),
         opencv::imgcodecs::IMREAD_GRAYSCALE,
     )
     .unwrap();

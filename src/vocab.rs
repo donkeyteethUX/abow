@@ -1,4 +1,3 @@
-#[cfg(feature = "bincode")]
 use bitvec::{order::Msb0, view::BitView};
 use rand::{
     distributions::{weighted::WeightedIndex, Distribution},
