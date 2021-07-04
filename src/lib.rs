@@ -1,3 +1,4 @@
+use smallvec::SmallVec;
 use thiserror::Error;
 
 /// Implementation of a visual bag-of-words vocabulary,
@@ -23,40 +24,34 @@ pub type Desc = [u8; 32];
 /// Index: word/leaf id in the vocabulary.
 ///
 /// Value: total weight of that word in provided features.
-pub type BoW = Vec<f32>;
+pub struct BoW(pub Vec<f32>);
 
-/// This type represents a map from features to their corresponding nodes in the Vocabulary tree.
+/// A map from features to their corresponding nodes in the Vocabulary tree.
+/// Each feature maps to several nodes, up to one for each level of the tree.
 ///
 /// The direct index for `feature[i]` is `di = DirectIdx[i]` where
-/// `di.len() <= l` (number of levels), and `di[j]` is the id of the node matching `feature[i]`
+/// `di.len() <= l` (number of levels).
+/// `di[j]` is the id of the node matching `feature[i]`
 /// at level `j` in the Vocabulary tree.
-pub type DirectIdx = Vec<Vec<usize>>;
+pub type DirectIdx = Vec<IdPath>;
 
-/// Provides method(s) for computing the similarity score between bow vectors.
-pub trait BoWTrait {
+/// The path from the root to the leaf for a given feature.
+/// Only 5 entries are stack allocated, so level > 5 would have poor performance.
+type IdPath = SmallVec<[usize; 5]>;
+
+impl BoW {
     /// Compute L1 norm between two BoW. (Used in Galvez (Eq 2)).
-    fn l1(&self, other: &Self) -> f32;
-    fn l2(&self, other: &Self) -> f32;
-}
-
-impl BoWTrait for BoW {
-    fn l1(&self, other: &Self) -> f32 {
-        1. - 0.5
-            * (self
-                .iter()
-                .zip(other)
-                .fold(0., |a, (b, c)| a + (b - c).abs()))
-    }
-
-    /// Not sure if needed
-    fn l2(&self, _other: &Self) -> f32 {
-        unimplemented!()
+    pub fn l1(&self, other: &Self) -> f32 {
+        let values = self.0.iter().zip(&other.0);
+        1. - 0.5 * (values.fold(0., |a, (b, c)| a + (b - c).abs()))
     }
 }
 
-type Result<T> = std::result::Result<T, BowErr>;
+type BowResult<T> = std::result::Result<T, BowErr>;
 #[derive(Error, Debug)]
 pub enum BowErr {
+    #[error("No Features Provided")]
+    NoFeatures,
     #[error("Io Error")]
     Io(#[from] std::io::Error),
     #[cfg(feature = "bincode")]
@@ -74,7 +69,6 @@ pub enum BowErr {
 mod test {
     use super::*;
     use std::path::{Path, PathBuf};
-    #[ignore]
     #[test]
     fn test_recall() {
         // Load existing vocabulary
@@ -85,8 +79,8 @@ mod test {
             for &l in &[3_usize, 4_usize, 5_usize] {
                 for _ in 0..2 {
                     // Create vocabulary from features
-                    let voc = Vocabulary::create(&features, k, l).unwrap();
-                    // println!("Vocabulary: {:#?}", voc);
+                    let voc = Vocabulary::create(&features, k, l);
+                    println!("Vocabulary: {:#?}", voc);
 
                     // Create BoW vectors from the test data. Save file name for demonstration.
                     let mut bows: Vec<(PathBuf, BoW)> = Vec::new();
@@ -94,7 +88,7 @@ mod test {
                         let new_feat = load_img_get_kps(&entry.path()).unwrap();
                         bows.push((
                             entry.path(),
-                            voc.transform_with_direct_idx(&new_feat).unwrap().0,
+                            voc.transform(&new_feat).unwrap(),
                         ));
                     }
 

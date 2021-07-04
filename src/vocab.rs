@@ -1,4 +1,3 @@
-#[cfg(feature = "bincode")]
 use bitvec::{order::Msb0, view::BitView};
 use rand::{
     distributions::{weighted::WeightedIndex, Distribution},
@@ -6,6 +5,7 @@ use rand::{
     thread_rng, Rng,
 };
 use serde::{Deserialize, Serialize};
+use smallvec::ToSmallVec;
 use std::fmt;
 
 use crate::*;
@@ -17,7 +17,7 @@ enum ClusterInitMethod {
     KMeansPP,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Clone, Default)]
 /// Feature vocabulary built from a collection of image keypoint descriptors. Can be:
 /// 1. Created.
 /// 2. Saved to a file & loaded from a file (requires bincode feature, enabled by default).
@@ -26,7 +26,7 @@ enum ClusterInitMethod {
 pub struct Vocabulary {
     blocks: Vec<Block>,
     k: usize,
-    l: usize,
+    levels: usize,
     num_blocks: usize,
     num_leaves: usize,
 }
@@ -35,26 +35,30 @@ pub struct Vocabulary {
 impl Vocabulary {
     /// Transform a vector of binary descriptors into its bag of words
     /// representation with respect to the Vocabulary. Descriptor is l1 normalized.
-    pub fn transform(&self, features: &[Desc]) -> Result<BoW> {
-        Ok(self.transform_generic(features, false).0)
+    /// Returns Err if features is empty.
+    pub fn transform(&self, features: &[Desc]) -> BowResult<BoW> {
+        self.transform_generic(features, false).map(|res| res.0)
     }
 
     /// Transform a vector of binary descriptors into its bag of words
     /// representation with respect to the Vocabulary. Descriptor is l1 normalized.
+    /// Returns Err if features is empty.
     ///
     /// Also provides "direct index" from the features to their corresponding nodes in the Vocabulary tree.
     ///
     /// The direct index for `feature[i]` is `di = DirectIdx[i]` where
     /// `di.len() <= l` (number of levels), and `di[j]` is the id of the node matching `feature[i]`
     /// at level `j` in the Vocabulary tree.
-    pub fn transform_with_direct_idx(&self, features: &[Desc]) -> Result<(BoW, DirectIdx)> {
-        Ok(self.transform_generic(features, true))
+    pub fn transform_with_direct_idx(&self, features: &[Desc]) -> BowResult<(BoW, DirectIdx)> {
+        self.transform_generic(features, true)
     }
 
     /// Build a vocabulary from a collection of descriptors.
     ///
-    /// Args: (k: Branching factor, l: Max number of levels)
-    pub fn create(features: &[Desc], k: usize, l: usize) -> Result<Self> {
+    /// Args:
+    /// - k: Branching factor
+    /// - l: Max number of levels (Should be <= 5)
+    pub fn create(features: &[Desc], k: usize, l: usize) -> Self {
         // Start with root of tree
         let mut v = Self::empty(k, l);
 
@@ -64,12 +68,12 @@ impl Vocabulary {
         // Sort by block id
         v.blocks.sort_by(|a, b| a.id.get_bid().cmp(&b.id.get_bid()));
 
-        Ok(v)
+        v
     }
 
     /// Load an ABoW vocabulary from a file
     #[cfg(feature = "bincode")]
-    pub fn load<P: AsRef<std::path::Path>>(file: P) -> Result<Self> {
+    pub fn load<P: AsRef<std::path::Path>>(file: P) -> BowResult<Self> {
         let mut file = std::fs::File::open(file)?;
         let mut buffer: Vec<u8> = Vec::new();
         std::io::Read::read_to_end(&mut file, &mut buffer)?;
@@ -78,7 +82,7 @@ impl Vocabulary {
 
     /// Save vocabulary to a file
     #[cfg(feature = "bincode")]
-    pub fn save<P: AsRef<std::path::Path>>(&self, file: P) -> Result<()> {
+    pub fn save<P: AsRef<std::path::Path>>(&self, file: P) -> BowResult<()> {
         let serialized = bincode::serialize(&self)?;
         let mut file = std::fs::File::create(file)?;
         std::io::Write::write_all(&mut file, &serialized)?;
@@ -106,18 +110,22 @@ struct Children {
     ids: Vec<NodeId>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 /// Unique identifier for a node. The Leaf variant stores ids of all its parents,
 /// which is equivalent to the DirectIndex for any feature matching that leaf.
 enum NodeId {
     Block(usize),
-    Leaf(Vec<usize>),
+    Leaf(IdPath),
 }
 
 impl Vocabulary {
-    fn transform_generic(&self, features: &[Desc], di: bool) -> (BoW, DirectIdx) {
-        let mut bow: BoW = vec![0.; self.num_leaves];
-        let mut direct_idx: DirectIdx = Vec::new();
+    fn transform_generic(&self, features: &[Desc], di: bool) -> BowResult<(BoW, DirectIdx)> {
+        if features.is_empty() {
+            return Err(BowErr::NoFeatures);
+        }
+
+        let mut bow = BoW(vec![0.; self.num_leaves]);
+        let mut direct_idx: DirectIdx = Vec::with_capacity(features.len());
         for feature in features {
             // start at root block
             let mut block = &self.blocks[0];
@@ -126,7 +134,7 @@ impl Vocabulary {
             loop {
                 let mut best_child: (u8, usize) = (u8::MAX, 0);
                 for (child, child_feat) in block.children.features.iter().enumerate() {
-                    let d = Self::hamming(feature, child_feat);
+                    let d = hamming(feature, child_feat);
                     if d < best_child.0 {
                         best_child = (d, child)
                     }
@@ -143,10 +151,10 @@ impl Vocabulary {
                         // add word/leaf id and weight to result
                         let word_id = *ids.last().unwrap();
                         let weight = block.children.weights[best_child.1];
-                        match bow.get_mut(word_id) {
+                        match bow.0.get_mut(word_id) {
                             Some(w) => *w += weight,
                             None => {
-                                bow[word_id] = weight;
+                                bow.0[word_id] = weight;
                             }
                         }
                         break;
@@ -155,15 +163,15 @@ impl Vocabulary {
             }
         }
         // Normalize BoW vector
-        let sum: f32 = bow.iter().sum();
+        let sum: f32 = bow.0.iter().sum();
         if sum > 0. {
             let inv_sum = 1. / sum;
-            for w in bow.iter_mut() {
+            for w in bow.0.iter_mut() {
                 *w *= inv_sum;
             }
         }
 
-        (bow, direct_idx)
+        Ok((bow, direct_idx))
     }
 
     fn cluster(&mut self, features: &[Desc], parent_ids: Vec<usize>, curr_level: usize) {
@@ -182,7 +190,7 @@ impl Vocabulary {
             for (i, f) in features.iter().enumerate() {
                 let mut best: (usize, u8) = (0, u8::MAX);
                 for (j, c) in clusters.iter().enumerate() {
-                    let d = Self::hamming(c, f);
+                    let d = hamming(c, f);
                     if d < best.1 {
                         best = (j, d);
                     }
@@ -213,7 +221,7 @@ impl Vocabulary {
         // create block
         let ids: Vec<_> = groups
             .iter()
-            .map(|g| self.next_node_id(curr_level == self.l || g.len() == 1, &parent_ids))
+            .map(|g| self.next_node_id(curr_level == self.levels || g.len() == 1, &parent_ids))
             .collect();
         let children = Children {
             weights: vec![1.; groups.len()],
@@ -227,8 +235,8 @@ impl Vocabulary {
         };
         self.blocks.push(block);
 
-        // recurse
-        if curr_level < self.l {
+        // Recurse
+        if curr_level < self.levels {
             for (i, id) in ids
                 .iter()
                 .enumerate()
@@ -289,7 +297,7 @@ impl Vocabulary {
             let mut dists: Vec<f32> = vec![std::u8::MAX as f32; features.len()];
             for (i, f) in features.iter().enumerate() {
                 for c in centroids.iter() {
-                    dists[i] = f32::min(Vocabulary::hamming(f, c) as f32, dists[i]);
+                    dists[i] = f32::min(hamming(f, c) as f32, dists[i]);
                 }
             }
             // 3. Select the next centroid from the data points such that the probability of choosing a point
@@ -323,20 +331,13 @@ impl Vocabulary {
         }
         result
     }
-    #[inline]
-    /// Hamming distance between two binary arrays (descriptors).
-    fn hamming(x: &[u8], y: &[u8]) -> u8 {
-        x.iter()
-            .zip(y)
-            .fold(0, |a, (b, c)| a + (*b ^ *c).count_ones() as u8)
-    }
 
     /// Provide the next NodeId, either leaf/word or block.
     fn next_node_id(&mut self, leaf: bool, parent_ids: &[usize]) -> NodeId {
         match leaf {
             true => {
                 // Leaf node will hold the block ids of its parents in addition to leaf id, to facilitate getting direct index later
-                let mut new_parent_ids = parent_ids[1..].to_vec(); // Clone ids but drop the first parent which is always 0
+                let mut new_parent_ids = parent_ids[1..].to_smallvec(); // Clone ids but drop the first parent which is always 0
                 new_parent_ids.push(self.num_leaves); // Add leaf id
                 self.num_leaves += 1;
                 NodeId::Leaf(new_parent_ids)
@@ -351,11 +352,19 @@ impl Vocabulary {
         Self {
             blocks: Vec::new(),
             k,
-            l,
             num_blocks: 0,
             num_leaves: 0,
+            levels: l,
         }
     }
+}
+
+#[inline]
+/// Hamming distance between two binary arrays (descriptors).
+fn hamming(x: &[u8], y: &[u8]) -> u8 {
+    x.iter()
+        .zip(y)
+        .fold(0, |a, (b, c)| a + (*b ^ *c).count_ones() as u8)
 }
 
 impl NodeId {
@@ -392,7 +401,7 @@ impl fmt::Debug for Vocabulary {
         f.debug_struct("Vocabulary")
             .field("Word/Leaf Nodes", &self.num_leaves)
             .field("Other Nodes", &self.num_blocks)
-            .field("Levels", &self.l)
+            .field("Levels", &self.levels)
             .field("Branching Factor", &self.k)
             .field("Total Training Features", &sum)
             .field(

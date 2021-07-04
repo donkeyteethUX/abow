@@ -12,14 +12,12 @@ fn main() {
 
     // Create BoW vectors from the test data. Save file name for demonstration.
     let mut bows: Vec<(PathBuf, BoW)> = Vec::new();
-    for entry in Path::new("data/test").read_dir().expect("Error") {
-        if let Ok(entry) = entry {
-            let new_feat = load_img_get_kps(&entry.path()).unwrap();
-            bows.push((
-                entry.path(),
-                voc.transform_with_direct_idx(&new_feat).unwrap().0,
-            ));
-        }
+    for entry in Path::new("data/test").read_dir().expect("Error").flatten() {
+        let new_feat = load_img_get_kps(&entry.path()).unwrap();
+        bows.push((
+            entry.path(),
+            voc.transform_with_direct_idx(&new_feat).unwrap().0,
+        ));
     }
 
     // Compare a few images to the the while colection, using L1 norm
