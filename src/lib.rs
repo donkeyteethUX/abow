@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use thiserror::Error;
 
@@ -24,6 +25,7 @@ pub type Desc = [u8; 32];
 /// Index: word/leaf id in the vocabulary.
 ///
 /// Value: total weight of that word in provided features.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BoW(pub Vec<f32>);
 
 /// A map from features to their corresponding nodes in the Vocabulary tree.
@@ -66,6 +68,7 @@ pub enum BowErr {
 }
 
 #[cfg(test)]
+#[cfg(feature = "opencv")]
 mod test {
     use super::*;
     use std::path::{Path, PathBuf};
@@ -86,10 +89,7 @@ mod test {
                     let mut bows: Vec<(PathBuf, BoW)> = Vec::new();
                     for entry in Path::new("data/test").read_dir().expect("Error").flatten() {
                         let new_feat = load_img_get_kps(&entry.path()).unwrap();
-                        bows.push((
-                            entry.path(),
-                            voc.transform(&new_feat).unwrap(),
-                        ));
+                        bows.push((entry.path(), voc.transform(&new_feat).unwrap()));
                     }
 
                     // sort the files just for nicer output
