@@ -1,6 +1,9 @@
 #![cfg(feature = "opencv")]
 use crate::{BowErr, BowResult, Desc};
-use opencv::{self, core::MatTrait, prelude::Feature2DTrait};
+use opencv::{
+    self,
+    prelude::{Feature2DTrait, MatTraitConst},
+};
 use std::{convert::TryInto, path::Path};
 
 type CvImage = opencv::prelude::Mat;
@@ -13,8 +16,8 @@ fn orb_from_cvimage(cv_img: &CvImage) -> BowResult<Vec<Desc>> {
 
     // Detect keypoints and compute descriptors
     let mut kps = opencv::types::VectorOfKeyPoint::new();
-    let mut desc = CvMat::default().unwrap();
-    let mask = CvMat::default().unwrap();
+    let mut desc = CvMat::default();
+    let mask = CvMat::default();
     orb.detect_and_compute(cv_img, &mask, &mut kps, &mut desc, false)?;
 
     // Copy data from CvMat into descriptor buffer

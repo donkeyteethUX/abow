@@ -18,11 +18,7 @@ enum ClusterInitMethod {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Clone, Default)]
-/// Feature vocabulary built from a collection of image keypoint descriptors. Can be:
-/// 1. Created.
-/// 2. Saved to a file & loaded from a file (requires bincode feature, enabled by default).
-/// 3. Used to transform a new set of descriptors into a BoW representation (and
-///    optionally get DirectIndex from features to nodes).
+/// Visual vocabulary built from a collection of image features.
 pub struct Vocabulary {
     blocks: Vec<Block>,
     k: usize,
@@ -37,7 +33,7 @@ impl Vocabulary {
     /// representation with respect to the Vocabulary. Descriptor is l1 normalized.
     /// Returns Err if features is empty.
     pub fn transform(&self, features: &[Desc]) -> BowResult<BoW> {
-        self.transform_generic(features, false).map(|res| res.0)
+        self.transform_inner(features, false).map(|res| res.0)
     }
 
     /// Transform a vector of binary descriptors into its bag of words
@@ -50,7 +46,7 @@ impl Vocabulary {
     /// `di.len() <= l` (number of levels), and `di[j]` is the id of the node matching `feature[i]`
     /// at level `j` in the Vocabulary tree.
     pub fn transform_with_direct_idx(&self, features: &[Desc]) -> BowResult<(BoW, DirectIdx)> {
-        self.transform_generic(features, true)
+        self.transform_inner(features, true)
     }
 
     /// Build a vocabulary from a collection of descriptors.
@@ -119,7 +115,7 @@ enum NodeId {
 }
 
 impl Vocabulary {
-    fn transform_generic(&self, features: &[Desc], di: bool) -> BowResult<(BoW, DirectIdx)> {
+    fn transform_inner(&self, features: &[Desc], di: bool) -> BowResult<(BoW, DirectIdx)> {
         if features.is_empty() {
             return Err(BowErr::NoFeatures);
         }
@@ -153,9 +149,7 @@ impl Vocabulary {
                         let weight = block.children.weights[best_child.1];
                         match bow.0.get_mut(word_id) {
                             Some(w) => *w += weight,
-                            None => {
-                                bow.0[word_id] = weight;
-                            }
+                            None => bow.0[word_id] = weight,
                         }
                         break;
                     }
@@ -334,18 +328,15 @@ impl Vocabulary {
 
     /// Provide the next NodeId, either leaf/word or block.
     fn next_node_id(&mut self, leaf: bool, parent_ids: &[usize]) -> NodeId {
-        match leaf {
-            true => {
-                // Leaf node will hold the block ids of its parents in addition to leaf id, to facilitate getting direct index later
-                let mut new_parent_ids = parent_ids[1..].to_smallvec(); // Clone ids but drop the first parent which is always 0
-                new_parent_ids.push(self.num_leaves); // Add leaf id
-                self.num_leaves += 1;
-                NodeId::Leaf(new_parent_ids)
-            }
-            false => {
-                self.num_blocks += 1;
-                NodeId::Block(self.num_blocks)
-            }
+        if leaf {
+            // Leaf node will hold the block ids of its parents in addition to leaf id, to facilitate getting direct index later
+            let mut new_parent_ids = parent_ids[1..].to_smallvec(); //  drop the first parent which is always 0
+            new_parent_ids.push(self.num_leaves); // Add leaf id
+            self.num_leaves += 1;
+            NodeId::Leaf(new_parent_ids)
+        } else {
+            self.num_blocks += 1;
+            NodeId::Block(self.num_blocks)
         }
     }
     fn empty(k: usize, l: usize) -> Self {

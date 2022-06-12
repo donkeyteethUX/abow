@@ -7,17 +7,12 @@ use thiserror::Error;
 pub mod vocab;
 pub use vocab::Vocabulary;
 
-/// Utilities for extracting keypoint descriptors using opencv.
+/// Utilities for extracting feature descriptors using opencv.
 pub mod opencv_utils;
 #[cfg(feature = "opencv")]
 pub use opencv_utils::*;
 
-/// Supported descriptor type is 32-bit binary array.
-///
-/// This is the most commonly used keypoint descriptor data type.
-/// It is used by ORB and BRIEF, for example.
-///
-/// In the future support can be added for other binary descriptor sizes.
+/// Supported descriptor type is 256-bit array.
 pub type Desc = [u8; 32];
 
 /// Bag-of-Words representation of an image or descriptor set.
@@ -38,8 +33,8 @@ pub struct BoW(pub Vec<f32>);
 pub type DirectIdx = Vec<IdPath>;
 
 /// The path from the root to the leaf for a given feature.
-/// Only 5 entries are stack allocated, so level > 5 would have poor performance.
-type IdPath = SmallVec<[usize; 5]>;
+// Only 5 entries are stack allocated, so level > 5 would have poor performance.
+pub type IdPath = SmallVec<[usize; 5]>;
 
 impl BoW {
     /// Compute L1 norm between two BoW. (Used in Galvez (Eq 2)).
@@ -73,10 +68,12 @@ mod test {
     use super::*;
     use std::path::{Path, PathBuf};
     #[test]
+    /// Performs a somewhat ad-hoc parameter search for the highest recall as a function
+    /// of `l` and `k`. l=4 and k=10 is apparently best.
     fn test_recall() {
         // Load existing vocabulary
         let features = all_kps_from_dir("data/train").unwrap();
-        println!("Detected {} ORB keypoints.", features.len());
+        println!("Detected {} ORB features.", features.len());
 
         for &k in &[6_usize, 8_usize, 10_usize] {
             for &l in &[3_usize, 4_usize, 5_usize] {
@@ -105,7 +102,7 @@ mod test {
 
                     let mut cost = 0;
 
-                    // Compare a few images to the the while colection, using L1 norm
+                    // Compare a few images to the the whole collection using L1 norm
                     for (f1, bow1) in bows.iter().skip(12).take(158) {
                         let mut scores: Vec<(f32, usize, i32)> = Vec::new();
                         let reference = num(f1.file_name().unwrap().to_str().unwrap());
@@ -118,7 +115,7 @@ mod test {
                         }
 
                         // Print out the top 5 matches for each image
-                        let base_cost = 0 + 1 + 1 + 2 + 2 + 3 + 3 + 4 + 4 + 5 + 5 + 6;
+                        let base_cost = 36; // 0 + 1 + 1 + 2 + 2 + 3 + 3 + 4 + 4 + 5 + 5 + 6
 
                         scores.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
                         for m in scores[..12].iter() {

@@ -4,7 +4,7 @@ fn main() {
 
     // Extract orb descriptors from images
     let features = all_kps_from_dir("data/train").unwrap();
-    println!("Detected {} ORB keypoints.", features.len());
+    println!("Detected {} ORB features.", features.len());
 
     // Create vocabulary from features
     let voc = Vocabulary::create(&features, 9, 3);
