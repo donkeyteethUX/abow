@@ -6,18 +6,18 @@ This crate is primarily designed for use with user-provided keypoint descriptors
 
 These functions can be enabled or disabled using the feature flag "opencv". This feature is enabled by default, so if you don't want to use opencv, update your Cargo.toml with:
 ```toml
-abow = {version = "0.2", default-features = false, features = ["bincode"]}
+abow = {version = "0.4", default-features = false, features = ["bincode"]}
 ```
-or if you want to disable bincode (serialization library for easy vocabulary save/load) as well:
+or if you also want to disable bincode serialization helpers:
 ```toml
-abow = {version = "0.2", default-features = false}
+abow = {version = "0.4", default-features = false}
 ```
 Otherwise, you'll need to [install OpenCV](https://docs.opencv.org/master/d0/d3d/tutorial_general_install.html). Troubleshooting for opencv-rust binding issues is available at https://github.com/twistedfall/opencv-rust.
 
 ## Executable Examples
 Create a descriptor vocabulary from a set of images and save it:
 ```console
-foo@bar:~/repos/ABoW$ cargo run --release --example create-voc
+foo@bar:~/repos/abow$ cargo run --release --example create-voc
 
 Vocabulary = Vocabulary {
     Word/Leaf Nodes: 3125,
@@ -32,7 +32,7 @@ Vocabulary = Vocabulary {
 ```
 Load a vocabulary, transform a sequence of images into BoW, and compute best matches between them:
 ```console
-foo@bar:~/repos/ABoW$ cargo run --release --example match
+foo@bar:~/repos/abow$ cargo run --release --example match
 
 Top 5 Matches for "100.jpg":
 Match     | Score
@@ -44,5 +44,5 @@ Match     | Score
 ```
 
 ## References
-This library is largely based on the C++ repositories [DBoW2](https://github.com/dorian3d/DBoW2/) and [fbow](https://github.com/rmsalinas/fbow).
+Abow is inspired by the C++ visual BoW implemetations [DBoW2](https://github.com/dorian3d/DBoW2/) and [fbow](https://github.com/rmsalinas/fbow).
 
